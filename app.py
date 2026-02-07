@@ -1,70 +1,71 @@
 import os
 import re
-import requests
-from bs4 import BeautifulSoup
-from flask import Flask, jsonify
+import pandas as pd
+from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
+from io import BytesIO
 
 app = Flask(__name__)
 CORS(app)
 
-# 1. PASTIKAN COOKIE INI BARU (Ambil dari Inspect Element -> Network -> Cookie)
-COOKIE_DATA = "PHPSESSID=u3ft88fp5slu1m761fsvd1ev75" 
+# Database sementara (disimpan di RAM server)
+storage = []
 
-def get_facebook_codes():
-    # URL sesuai screenshot kamu
-    url = "https://calltimepanel.com/yeni/TestSMS/"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Cookie": COOKIE_DATA
+def extract_uid(cookie_string):
+    # Mencari ID setelah tulisan c_user=
+    match = re.search(r"c_user=(\d+)", cookie_string)
+    if match:
+        return match.group(1)
+    return "UID_NOT_FOUND"
+
+@app.route('/save-cookie', methods=['POST'])
+def save_cookie():
+    data = request.json
+    raw_cookie = data.get('cookie', '')
+    password = data.get('password', 'tasik321') # default pass
+
+    if not raw_cookie:
+        return jsonify({"status": "error", "message": "Cookie kosong"}), 400
+
+    uid = extract_uid(raw_cookie)
+    
+    # Format sesuai permintaan: UID|PASS|COOKIE
+    formatted_string = f"{uid}|{password}|{raw_cookie}"
+    
+    entry = {
+        "uid": uid,
+        "password": password,
+        "cookie": raw_cookie,
+        "formatted": formatted_string
     }
     
-    try:
-        r = requests.get(url, headers=headers, timeout=15)
-        # Jika diarahkan ke halaman login, berarti cookie mati
-        if "login" in r.url.lower():
-            return [{"range_sender": "ERROR", "code": "COOKIE MATI", "full_text": "Silahkan update cookie di app.py", "time": "now"}]
+    storage.append(entry)
+    return jsonify({"status": "success", "data": entry})
 
-        soup = BeautifulSoup(r.text, 'html.parser')
-        table = soup.find('table')
-        
-        if not table:
-            return []
+@app.route('/get-all', methods=['GET'])
+def get_all():
+    return jsonify(storage)
 
-        rows = table.find_all('tr')[1:] # Lewati header
-        results = []
-        
-        for row in rows:
-            cols = row.find_all('td')
-            if len(cols) >= 4:
-                sender = cols[1].text.strip()
-                receiver = cols[2].text.strip()
-                sms_text = cols[3].text.strip()
-                time = cols[4].text.strip()
-                
-                # Logika: Cek di teks SMS ATAU di nama Sender
-                is_fb = "facebook" in sms_text.lower() or "facebook" in sender.lower()
-                
-                if is_fb:
-                    # Cari angka 5 digit
-                    match = re.search(r'(\d{5})', sms_text)
-                    code = match.group(1) if match else "???"
-                    
-                    results.append({
-                        "range_sender": sender,
-                        "target": receiver,
-                        "code": code,
-                        "full_text": sms_text,
-                        "time": time
-                    })
-        return results
-    except Exception as e:
-        return [{"range_sender": "SYSTEM ERROR", "code": "ERR", "full_text": str(e), "time": "now"}]
+@app.route('/clear-data', methods=['POST'])
+def clear_data():
+    storage.clear()
+    return jsonify({"status": "success"})
 
-@app.route('/get-fb')
-def get_fb():
-    data = get_facebook_codes()
-    return jsonify(data)
+@app.route('/download-excel', methods=['GET'])
+def download_excel():
+    if not storage:
+        return "Data kosong", 400
+    
+    # Buat DataFrame untuk Excel
+    df = pd.DataFrame(storage)
+    # Kita hanya ambil kolom formatted untuk hasil akhir atau semua kolom
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Cookies')
+    
+    output.seek(0)
+    return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 
+                     as_attachment=True, download_name='cookies_fb.xlsx')
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=8000) # Pastikan port 8000 sesuai Koyeb
+    app.run(host='0.0.0.0', port=8000)
