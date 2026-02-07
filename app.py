@@ -8,10 +8,10 @@ app = Flask(__name__)
 CORS(app)
 
 # MASUKKAN COOKIE YANG TADI KAMU AMBIL DI FASE 1
-COOKIE_DATA = "session_id=xxxxxxxxxxxxxxx; other_cookie=yyyyyy"
+COOKIE_DATA = "PHPSESSID=u3ft88fp5slu1m761fsvd1ev75"
 
 def scrape_panel():
-    url = "https://calltimepanel.com/dashboard" # Sesuaikan URL dashboard/stats
+    url = "https://www.calltimepanel.com/yeni/TestSMS/" # Sesuaikan URL dashboard/stats
     headers = {
         "User-Agent": "Mozilla/5.0",
         "Cookie": COOKIE_DATA
